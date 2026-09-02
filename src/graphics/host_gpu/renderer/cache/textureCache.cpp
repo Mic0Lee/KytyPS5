@@ -902,6 +902,81 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& reques
 	return {merged_id};
 }
 
+void TextureCache::PrepareStorageSampledOverlap(const ImageDesc& desc) {
+	if (desc.type != BindingType::Texture && desc.type != BindingType::Storage) {
+		return;
+	}
+
+	std::vector<ImageId> candidates;
+	std::vector<ImageId> gpu_candidates;
+	{
+		std::scoped_lock lock {m_lock};
+		for (const auto id: FindImagesInRegion(desc.info.data.address, desc.info.data.size, false)) {
+			const auto* image = m_slot_images.try_get(id);
+			if (image == nullptr ||
+			    !IsStorageSampledFormatMismatch(*image, desc.info, desc.type)) {
+				continue;
+			}
+			candidates.push_back(id);
+			if (image->IsGpuModified()) {
+				gpu_candidates.push_back(id);
+			}
+		}
+	}
+	if (candidates.empty()) {
+		return;
+	}
+	// A storage image may have produced the bytes that a differently-formatted sampled
+	// image is about to consume. Publish those bytes before separating the cache owners.
+	// Use the image path directly: storage writes are not necessarily enrolled in the
+	// optional CPU-read tracker, while TryDownloadImage supports the same linear/tiled
+	// download plan used by normal image retirement.
+	if (!gpu_candidates.empty()) {
+		{
+			std::scoped_lock lock {m_lock};
+			for (const auto id: gpu_candidates) {
+				if (m_slot_images.try_get(id) == nullptr || !TryDownloadImage(id)) {
+					EXIT("TextureCache: cannot publish storage image before format reinterpretation "
+					     "at 0x%016" PRIx64 "\n",
+					     desc.info.data.address);
+				}
+			}
+		}
+		const auto tick = m_scheduler.CurrentTick();
+		m_scheduler.Finish();
+		m_scheduler.WaitPriorityOperations(tick);
+		std::scoped_lock lock {m_lock};
+		for (const auto id: gpu_candidates) {
+			auto* image = m_slot_images.try_get(id);
+			if (image == nullptr) {
+				continue;
+			}
+			const auto range = image->info.data;
+			image->ClearGpuModified();
+			m_download_images.erase(id);
+			m_buffer_cache.InvalidateMemory(range.address, range.size);
+		}
+	}
+
+	// Once the storage bytes have been published, discard the incompatible owner.
+	// The next lookup creates a correctly formatted image and uploads from the
+	// invalidated backing range. Keeping both owners registered leaves the sampled
+	// owner stale (notably the R8 glyph atlas) and can also make the range tracker
+	// select the wrong image.
+	std::scoped_lock lock {m_lock};
+	for (const auto id: candidates) {
+		auto* image = m_slot_images.try_get(id);
+		if (image == nullptr || !image->registered) {
+			continue;
+		}
+		if (image->IsGpuModified()) {
+			EXIT("TextureCache: cannot separate storage/sampled image without readback at "
+			     "0x%016" PRIx64 "\n", image->info.data.address);
+		}
+		FreeImage(id);
+	}
+}
+
 ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId source_id) {
 	RefreshCopySource(source_id);
 	const auto expanded_id = InsertImage(info);
