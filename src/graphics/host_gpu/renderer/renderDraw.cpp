@@ -1155,12 +1155,18 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 
 	SetGraphicsDynamicParams(buffer, vk_buffer, vertex_stages.back(), state.depth_info, rendering);
-	if (m_context.GetGraphics().attachment_feedback_loop_enabled) {
-		vk_buffer.setAttachmentFeedbackLoopEnableEXT(
-		    rendering.depth_stencil_attachment.image_layout ==
-		            vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT
-		        ? vk::ImageAspectFlags {vk::ImageAspectFlagBits::eDepth}
-		        : vk::ImageAspectFlags {});
+	if (m_context.GetGraphics().attachment_feedback_loop_dynamic_enabled) {
+		const auto& attachment = rendering.depth_stencil_attachment;
+		vk::ImageAspectFlags feedback_aspects {};
+		if (attachment.image_layout == vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT) {
+			if (attachment.has_depth) {
+				feedback_aspects |= vk::ImageAspectFlagBits::eDepth;
+			}
+			if (attachment.has_stencil) {
+				feedback_aspects |= vk::ImageAspectFlagBits::eStencil;
+			}
+		}
+		vk_buffer.setAttachmentFeedbackLoopEnableEXT(feedback_aspects);
 	}
 
 	LogDrawPhase(draw.Name(), "BeginRendering");
