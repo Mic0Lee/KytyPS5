@@ -131,6 +131,7 @@ private:
 	int              m_connected_count = 0;
 	bool             m_motion_enabled  = true;
 	uint64_t         m_gyro_time       = 0;
+	uint32_t         m_axis_buttons    = 0;
 	ControllerState  m_state;
 	ControllerState  m_states[STATES_MAX];
 	bool             m_obtained[STATES_MAX] {};
@@ -342,6 +343,7 @@ void GameController::CheckActive() {
 	m_active_id     = new_active_id;
 	m_connected     = new_connected;
 	m_state         = {};
+	m_axis_buttons  = 0;
 	m_gyro_time     = 0;
 	m_states_num    = 0;
 	m_first_state   = 0;
@@ -384,6 +386,15 @@ void GameController::Axis(int id, Controller::Axis axis, int value) {
 		EXIT_IF(axis_id < 0 || axis_id >= static_cast<int>(Controller::Axis::AxisMax));
 
 		m_state.axes[axis_id] = value;
+
+		if (axis == Controller::Axis::RightX) {
+			constexpr int axis_threshold = 16000;
+			const uint32_t axis_buttons = value > axis_threshold
+			                                  ? PAD_BUTTON_RIGHT
+			                                  : value < -axis_threshold ? PAD_BUTTON_LEFT : 0;
+			m_state.buttons = (m_state.buttons & ~m_axis_buttons) | axis_buttons;
+			m_axis_buttons  = axis_buttons;
+		}
 
 		uint32_t trigger = 0;
 		if (axis == Controller::Axis::TriggerLeft) {
@@ -504,6 +515,7 @@ void GameController::ResetOrientation() {
 void GameController::ResetInputState() {
 	Common::LockGuard lock(m_mutex);
 	m_state.buttons = 0;
+	m_axis_buttons  = 0;
 	std::fill_n(m_state.axes, 4, 128);
 	std::fill_n(m_state.axes + 4, 2, 0);
 	for (auto& touch: m_state.touch) {
