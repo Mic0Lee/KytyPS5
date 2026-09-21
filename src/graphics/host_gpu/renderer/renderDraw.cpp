@@ -544,7 +544,6 @@ RenderState RenderExecutor::AcquireRenderTargets(
 		}
 		const auto sampled_depth = [&](const PreparedBindings& prepared) {
 			return std::ranges::any_of(prepared.images, [&](const TextureBinding& binding) {
-			return std::ranges::any_of(prepared.images, [&](const TextureBinding& binding) {
 			    if (binding.image_id != depth.image_id ||
 			        binding.desc.type != TextureCache::BindingType::Texture) {
 				    return false;
