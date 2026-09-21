@@ -453,7 +453,7 @@ struct DrawCallInfo {
 
 RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderColorInfo* colors,
 												 uint32_t color_count, RenderDepthInfo& depth,
-												 const std::optional<PreparedBindings>& pixel) {
+												 std::span<PreparedBindings* const> stages) {
 	EXIT_IF(colors == nullptr || color_count > RENDER_COLOR_ATTACHMENTS_MAX);
 	auto&       cache = m_context.GetTextureCache();
 	RenderState state {};
@@ -542,7 +542,28 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			EXIT("mixed color/depth sample counts are unsupported: %u and %u\n", attachment_samples,
 			     depth.desc.info.samples);
 		}
-				const bool feedback = depth.depth_write_enable && image.binding.is_bound;
+		const auto sampled_depth = [&](const PreparedBindings& prepared) {
+			return std::ranges::any_of(prepared.images, [&](const TextureBinding& binding) {
+				if (binding.image_id != depth.image_id ||
+				    binding.desc.type != TextureCache::BindingType::Texture) {
+					return false;
+				}
+				const auto native =
+				    std::ranges::find(image.views, binding.image_view, &CachedImageView::view);
+				EXIT_IF(native == image.views.end());
+				const auto& sampled = native->info;
+				const auto& target  = depth.desc.view_info;
+				return (sampled.aspect & vk::ImageAspectFlagBits::eDepth) &&
+				       ImageRangeOverlaps(sampled.base_level, sampled.level_count,
+				                          target.base_level, target.level_count) &&
+				       ImageRangeOverlaps(sampled.base_layer, sampled.layer_count,
+				                          target.base_layer, target.layer_count);
+			});
+		};
+		const bool feedback = depth.depth_write_enable &&
+		    std::ranges::any_of(stages, [&](const PreparedBindings* prepared) {
+				return prepared != nullptr && sampled_depth(*prepared);
+		    });
 		if (feedback && !m_context.GetGraphics().attachment_feedback_loop_enabled) {
 			EXIT("depth attachment feedback loop is not supported by the host\n");
 		}
@@ -1095,7 +1116,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	const auto rendering =
 	    AcquireRenderTargets(buffer, state.color_info, state.color_count, state.depth_info,
-								 bindings.pixel);
+								 stages);
 
 	if (draw.IsIndexed()) {
 		LogDrawPhase(draw.Name(), "CreatePipeline");
