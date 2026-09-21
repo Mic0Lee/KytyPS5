@@ -989,8 +989,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 					EXIT_IF(storage || host_view == image.views.end());
 					const auto aspect = host_view->info.aspect;
 					const bool depth_feedback =
-					    layout == vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT &&
-					    program.stage == ShaderType::Pixel;
+                        layout == vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT;
 					const bool depth_read =
 					    depth_feedback || layout == vk::ImageLayout::eDepthReadOnlyOptimal ||
 					    layout == vk::ImageLayout::eDepthStencilReadOnlyOptimal ||
