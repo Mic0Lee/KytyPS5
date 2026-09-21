@@ -133,6 +133,7 @@ jobs:
 
   macos:
     name: Build KytyPS5 (macOS)
+    if: false
     needs: metadata
     runs-on: macos-15
 
