@@ -995,7 +995,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 					    layout == vk::ImageLayout::eDepthStencilReadOnlyOptimal ||
 					    layout == vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal;
 					const bool stencil_read =
-					    layout == vk::ImageLayout::eStencilReadOnlyOptimal ||
+											depth_feedback || layout == vk::ImageLayout::eStencilReadOnlyOptimal ||
 					    layout == vk::ImageLayout::eDepthStencilReadOnlyOptimal ||
 					    layout == vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal;
 					if ((aspect & vk::ImageAspectFlagBits::eDepth && !depth_read) ||
