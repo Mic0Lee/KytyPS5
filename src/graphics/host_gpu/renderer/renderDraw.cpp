@@ -451,9 +451,9 @@ struct DrawCallInfo {
 	[[nodiscard]] const char* Name() const { return IsIndexed() ? "DrawIndex" : "DrawIndexAuto"; }
 };
 
-RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderColorInfo* colors,
-                                                 uint32_t color_count, RenderDepthInfo& depth,
-                                                 const std::optional<PreparedBindings>& pixel) {
+RenderState RenderExecutor::AcquireRenderTargets(
+		CommandBuffer& buffer, RenderColorInfo* colors, uint32_t color_count, RenderDepthInfo& depth,
+		std::span<PreparedBindings* const> stages) {
 	EXIT_IF(colors == nullptr || color_count > RENDER_COLOR_ATTACHMENTS_MAX);
 	auto&       cache = m_context.GetTextureCache();
 	RenderState state {};
@@ -542,8 +542,9 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			EXIT("mixed color/depth sample counts are unsupported: %u and %u\n", attachment_samples,
 			     depth.desc.info.samples);
 		}
-		const bool feedback = depth.depth_write_enable && pixel &&
-		    std::ranges::any_of(pixel->images, [&](const TextureBinding& binding) {
+		const auto sampled_depth = [&](const PreparedBindings& prepared) {
+			return std::ranges::any_of(prepared.images, [&](const TextureBinding& binding) {
+			return std::ranges::any_of(prepared.images, [&](const TextureBinding& binding) {
 			    if (binding.image_id != depth.image_id ||
 			        binding.desc.type != TextureCache::BindingType::Texture) {
 				    return false;
@@ -558,7 +559,12 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			                              target.base_level, target.level_count) &&
 			           ImageRangeOverlaps(sampled.base_layer, sampled.layer_count,
 			                              target.base_layer, target.layer_count);
-		    });
+				});
+			};
+			const bool feedback = depth.depth_write_enable &&
+			      std::ranges::any_of(stages, [&](const PreparedBindings* prepared) {
+				    return prepared != nullptr && sampled_depth(*prepared);
+			    });
 		if (feedback && !m_context.GetGraphics().attachment_feedback_loop_enabled) {
 			EXIT("depth attachment feedback loop is not supported by the host\n");
 		}
@@ -1111,7 +1117,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	const auto rendering =
 	    AcquireRenderTargets(buffer, state.color_info, state.color_count, state.depth_info,
-	                         bindings.pixel);
+								 stages);
 
 	if (draw.IsIndexed()) {
 		LogDrawPhase(draw.Name(), "CreatePipeline");
