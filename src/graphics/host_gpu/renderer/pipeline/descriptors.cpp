@@ -983,26 +983,6 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 			} else if (image.binding.is_target) {
 				const auto layout = image.binding.attachment_layout;
 				EXIT_IF(layout == vk::ImageLayout::eUndefined);
-				if (image.info.IsDepth()) {
-					const auto host_view =
-					    std::ranges::find(image.views, binding.image_view, &CachedImageView::view);
-					EXIT_IF(storage || host_view == image.views.end());
-					const auto aspect = host_view->info.aspect;
-					const bool depth_feedback =
-					    layout == vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT;
-					const bool depth_read =
-					    depth_feedback || layout == vk::ImageLayout::eDepthReadOnlyOptimal ||
-					    layout == vk::ImageLayout::eDepthStencilReadOnlyOptimal ||
-					    layout == vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal;
-					const bool stencil_read =
-											depth_feedback || layout == vk::ImageLayout::eStencilReadOnlyOptimal ||
-					    layout == vk::ImageLayout::eDepthStencilReadOnlyOptimal ||
-					    layout == vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal;
-					if ((aspect & vk::ImageAspectFlagBits::eDepth && !depth_read) ||
-					    (aspect & vk::ImageAspectFlagBits::eStencil && !stencil_read)) {
-						EXIT("sampling a writable depth/stencil attachment aspect\n");
-					}
-				}
 				image.Transit(layout,
 				              image.binding.attachment_access | vk::AccessFlagBits2::eShaderRead |
 				                  (image.binding.shader_write ? vk::AccessFlagBits2::eShaderWrite
