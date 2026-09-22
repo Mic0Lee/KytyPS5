@@ -837,6 +837,10 @@ PipelineCache::Pipeline& PipelineCache::GetGraphicsPipeline(
 		     " last_create_ms=%" PRId64 "\n",
 		     m_graphics_pipeline_hits.load(std::memory_order_relaxed), create_count, create_ms);
 	}
+	if (create_count - m_last_checkpoint_miss_count >= 128) {
+		m_last_checkpoint_miss_count = create_count;
+		SaveUnlocked(false);
+	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);

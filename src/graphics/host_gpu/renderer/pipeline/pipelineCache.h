@@ -221,6 +221,7 @@ private:
 	std::atomic<uint64_t> m_graphics_pipeline_misses {0};
 	std::atomic<uint64_t> m_compute_pipeline_hits {0};
 	std::atomic<uint64_t> m_compute_pipeline_misses {0};
+	uint64_t              m_last_checkpoint_miss_count = 0;
 
 	void InitializeDriverCache();
 	void SaveUnlocked(bool destroy_cache);
