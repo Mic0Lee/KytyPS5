@@ -325,23 +325,26 @@ bool StreamBuffer::WaitPendingOperations(const std::vector<Watch>& watches,
 	}
 	while (requested_upper_bound > wait_bound && wait_cursor < *invalidation_mark) {
 		const auto& watch = watches[wait_cursor];
-		if (!Scheduler().IsFree(watch.tick) && !allow_wait) {
-			return false;
+		const bool gpu_busy = !Scheduler().IsFree(watch.tick);
+		if (gpu_busy) {
+			if (!allow_wait) {
+				return false;
+			}
+			const auto wait_start = std::chrono::steady_clock::now();
+			Scheduler().Wait(watch.tick);
+			const auto wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
+			                             std::chrono::steady_clock::now() - wait_start)
+			                             .count();
+			const auto wait_count = g_wait_count.fetch_add(1, std::memory_order_relaxed) + 1;
+			g_wait_time_us.fetch_add(static_cast<uint64_t>(wait_us), std::memory_order_relaxed);
+			if ((wait_count & 63u) == 0) {
+				LOGF("Stream buffer waits: count=%" PRIu64 " total_us=%" PRIu64
+				     " last_us=%" PRId64 "\n",
+				     wait_count, g_wait_time_us.load(std::memory_order_relaxed), wait_us);
+			}
 		}
-		const auto wait_start = std::chrono::steady_clock::now();
-		Scheduler().Wait(watch.tick);
 		if (Usage() == MemoryUsage::Download) {
 			Scheduler().WaitPriorityOperations(watch.tick);
-		}
-		const auto wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
-		                         std::chrono::steady_clock::now() - wait_start)
-		                         .count();
-		const auto wait_count = g_wait_count.fetch_add(1, std::memory_order_relaxed) + 1;
-		g_wait_time_us.fetch_add(static_cast<uint64_t>(wait_us), std::memory_order_relaxed);
-		if ((wait_count & 63u) == 0) {
-			LOGF("Stream buffer waits: count=%" PRIu64 " total_us=%" PRIu64
-			     " last_us=%" PRId64 "\n",
-			     wait_count, g_wait_time_us.load(std::memory_order_relaxed), wait_us);
 		}
 		wait_bound = watch.upper_bound;
 		++wait_cursor;
