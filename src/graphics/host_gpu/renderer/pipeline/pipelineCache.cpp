@@ -433,10 +433,6 @@ void PipelineCache::InitializeDriverCache() {
 	if (title_id.empty()) {
 		return;
 	}
-	if (KYTY_BUILD != KYTY_BUILD_RELEASE) {
-		PipelineCacheLog("Vulkan pipeline cache: disabled (non-Release build)");
-		return;
-	}
 	const std::string_view git_hash     = KYTY_GIT_HASH;
 	const std::string_view git_revision = KYTY_GIT_REVISION;
 	if (git_hash == "unknown" || git_revision == "unknown") {
