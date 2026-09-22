@@ -508,6 +508,15 @@ void PipelineCache::InitializeDriverCache() {
 
 void PipelineCache::Save() {
 	Common::LockGuard lock(m_mutex);
+	SaveUnlocked(true);
+}
+
+void PipelineCache::SaveCheckpoint() {
+	Common::LockGuard lock(m_mutex);
+	SaveUnlocked(false);
+}
+
+void PipelineCache::SaveUnlocked(bool destroy_cache) {
 	if (m_driver_cache == nullptr) {
 		return;
 	}
@@ -561,8 +570,10 @@ void PipelineCache::Save() {
 	}
 	PipelineCacheLog("Vulkan pipeline cache: saved {} bytes to {}", payload.size(),
 	                 Common::PathToString(m_driver_cache_path));
-	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
-	m_driver_cache = nullptr;
+	if (destroy_cache) {
+		m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
+		m_driver_cache = nullptr;
+	}
 }
 
 PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(

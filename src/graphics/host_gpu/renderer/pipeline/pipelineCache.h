@@ -110,6 +110,7 @@ public:
 	~PipelineCache();
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
+	void SaveCheckpoint();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
@@ -222,6 +223,7 @@ private:
 	std::atomic<uint64_t> m_compute_pipeline_misses {0};
 
 	void InitializeDriverCache();
+	void SaveUnlocked(bool destroy_cache);
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);
