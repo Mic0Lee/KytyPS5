@@ -1,6 +1,7 @@
 #include "graphics/host_gpu/renderer/pipeline/descriptorHeap.h"
 
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/masterSemaphore.h"
@@ -32,14 +33,16 @@ DescriptorHeap::~DescriptorHeap() {
 }
 
 vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout layout) {
-	KYTY_PROFILER_FUNCTION();
+	KYTY_PROFILER_BLOCK("DescriptorHeap::Commit", profiler::colors::CyanA700);
 	EXIT_IF(layout == nullptr);
 
 	auto& batch = m_sets[layout];
 	if (batch.size != 0) {
+		m_pool_allocations.fetch_add(1, std::memory_order_relaxed);
 		return batch.sets[--batch.size];
 	}
 	if (Allocate(layout, batch)) {
+		m_pool_allocations.fetch_add(1, std::memory_order_relaxed);
 		return batch.sets[--batch.size];
 	}
 
@@ -47,9 +50,17 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout layout) {
 	if (const auto& [pool, tick] = m_pending_pools.front(); m_master_semaphore.IsFree(tick)) {
 		m_current_pool = pool;
 		m_pending_pools.pop_front();
+		m_pool_reuses.fetch_add(1, std::memory_order_relaxed);
 		EXIT_IF(m_graphics.device.resetDescriptorPool(m_current_pool, {}) != vk::Result::eSuccess);
 	} else {
 		CreateDescriptorPool();
+		const auto rotation = m_pool_rotations.fetch_add(1, std::memory_order_relaxed) + 1;
+		if ((rotation & 63u) == 0) {
+			LOGF("Descriptor heap: rotations=%" PRIu64 " reuses=%" PRIu64
+			     " allocations=%" PRIu64 " pending=%zu\n",
+			     rotation, m_pool_reuses.load(std::memory_order_relaxed),
+			     m_pool_allocations.load(std::memory_order_relaxed), m_pending_pools.size());
+		}
 	}
 
 	m_sets.clear();

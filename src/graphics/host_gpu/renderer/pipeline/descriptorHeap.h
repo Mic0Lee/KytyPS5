@@ -5,6 +5,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <array>
+#include <atomic>
 #include <deque>
 #include <unordered_map>
 
@@ -38,6 +39,9 @@ private:
 	vk::DescriptorPool                                  m_current_pool = nullptr;
 	std::deque<std::pair<vk::DescriptorPool, uint64_t>> m_pending_pools;
 	std::unordered_map<vk::DescriptorSetLayout, Batch>  m_sets;
+	std::atomic<uint64_t>                               m_pool_reuses {0};
+	std::atomic<uint64_t>                               m_pool_rotations {0};
+	std::atomic<uint64_t>                               m_pool_allocations {0};
 };
 
 } // namespace Libs::Graphics
