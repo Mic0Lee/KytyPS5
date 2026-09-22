@@ -7,6 +7,7 @@
 #include "graphics/host_gpu/renderer/render.h"
 
 #include <condition_variable>
+#include <atomic>
 #include <mutex>
 
 #include <queue>
@@ -97,6 +98,8 @@ private:
 	bool                         m_priority_active      = false;
 	uint64_t                     m_priority_active_tick = 0;
 	OperationState               m_operation_state      = OperationState::Open;
+	std::atomic<uint64_t>        m_submit_count {0};
+	std::atomic<uint64_t>        m_wait_count {0};
 };
 
 } // namespace Libs::Graphics

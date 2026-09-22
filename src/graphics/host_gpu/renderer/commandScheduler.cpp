@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
 
 #include <algorithm>
@@ -192,6 +193,7 @@ void CommandScheduler::Finish() {
 }
 
 void CommandScheduler::Wait(uint64_t tick) {
+	KYTY_PROFILER_BLOCK("CommandScheduler::Wait", profiler::colors::Amber300);
 	EXIT_IF(tick > CurrentTick());
 	if (tick == CurrentTick()) {
 		CheckActive();
@@ -200,9 +202,11 @@ void CommandScheduler::Wait(uint64_t tick) {
 		// resources are released only at the next GPU operation boundary.
 		const auto submitted_tick = Submit();
 		EXIT_IF(submitted_tick != tick);
+		m_wait_count.fetch_add(1, std::memory_order_relaxed);
 		m_master.Wait(tick);
 		BeginNext();
 	} else {
+		m_wait_count.fetch_add(1, std::memory_order_relaxed);
 		m_master.Wait(tick);
 	}
 }
@@ -344,6 +348,7 @@ CommandBuffer& CommandScheduler::BeginCommand() {
 }
 
 uint64_t CommandScheduler::Submit(SubmitInfo submit) {
+	KYTY_PROFILER_BLOCK("CommandScheduler::Submit", profiler::colors::Blue300);
 	EXIT_IF(m_command.IsInvalid());
 	EXIT_IF(submit.num_wait_semaphores > SubmitInfo::MaxSemaphores ||
 	        submit.num_signal_semaphores >= SubmitInfo::MaxSemaphores);
@@ -386,6 +391,11 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 		                  m_command.m_debug_arg4);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	const auto submit_count = m_submit_count.fetch_add(1, std::memory_order_relaxed) + 1;
+	if ((submit_count & 1023u) == 0) {
+		LOGF("Command scheduler: submits=%" PRIu64 " waits=%" PRIu64 "\n", submit_count,
+		     m_wait_count.load(std::memory_order_relaxed));
+	}
 
 	m_command.m_buffer = nullptr;
 	return tick;
