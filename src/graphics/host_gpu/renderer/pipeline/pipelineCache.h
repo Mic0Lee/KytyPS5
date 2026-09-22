@@ -10,10 +10,14 @@
 #include "graphics/shader/shader.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
+#include <deque>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <span>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -229,6 +233,15 @@ private:
 	void SaveUnlocked(bool destroy_cache);
 	[[nodiscard]] std::vector<uint8_t> CaptureCheckpointUnlocked();
 	void WriteCheckpoint(std::vector<uint8_t> payload);
+	void CheckpointWorker();
+	void StopCheckpointWorker();
+	void EnqueueCheckpoint(std::vector<uint8_t> payload);
+
+	std::mutex                    m_checkpoint_mutex;
+	std::condition_variable       m_checkpoint_available;
+	std::deque<std::vector<uint8_t>> m_checkpoint_queue;
+	std::thread                   m_checkpoint_thread;
+	bool                          m_checkpoint_stop = false;
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);

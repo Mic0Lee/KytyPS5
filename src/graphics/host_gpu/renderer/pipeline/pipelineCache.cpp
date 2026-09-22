@@ -409,9 +409,11 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
     : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
+	m_checkpoint_thread = std::thread([this] { CheckpointWorker(); });
 }
 
 PipelineCache::~PipelineCache() {
+	StopCheckpointWorker();
 	Save();
 	auto destroy = [this](const auto& pipelines) {
 		for (const auto& [key, pipeline]: pipelines) {
@@ -518,7 +520,7 @@ void PipelineCache::SaveCheckpoint() {
 		payload = CaptureCheckpointUnlocked();
 	}
 	if (!payload.empty()) {
-		WriteCheckpoint(std::move(payload));
+		EnqueueCheckpoint(std::move(payload));
 	}
 }
 
@@ -654,6 +656,46 @@ void PipelineCache::WriteCheckpoint(std::vector<uint8_t> payload) {
 	}
 	PipelineCacheLog("Vulkan pipeline cache: checkpointed {} bytes to {}", payload.size(),
 	                 Common::PathToString(m_driver_cache_path));
+}
+
+void PipelineCache::EnqueueCheckpoint(std::vector<uint8_t> payload) {
+	std::lock_guard lock(m_checkpoint_mutex);
+	if (m_checkpoint_stop) {
+		return;
+	}
+	// Keep only the newest snapshot. Older payloads contain strictly less cache data.
+	m_checkpoint_queue.clear();
+	m_checkpoint_queue.push_back(std::move(payload));
+	m_checkpoint_available.notify_one();
+}
+
+void PipelineCache::CheckpointWorker() {
+	for (;;) {
+		std::vector<uint8_t> payload;
+		{
+			std::unique_lock lock(m_checkpoint_mutex);
+			m_checkpoint_available.wait(lock, [this] {
+				return m_checkpoint_stop || !m_checkpoint_queue.empty();
+			});
+			if (m_checkpoint_queue.empty() && m_checkpoint_stop) {
+				return;
+			}
+			payload = std::move(m_checkpoint_queue.back());
+			m_checkpoint_queue.clear();
+		}
+		WriteCheckpoint(std::move(payload));
+	}
+}
+
+void PipelineCache::StopCheckpointWorker() {
+	{
+		std::lock_guard lock(m_checkpoint_mutex);
+		m_checkpoint_stop = true;
+	}
+	m_checkpoint_available.notify_one();
+	if (m_checkpoint_thread.joinable()) {
+		m_checkpoint_thread.join();
+	}
 }
 
 PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
