@@ -12,6 +12,7 @@
 #include <array>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -174,6 +175,12 @@ private:
 		std::optional<PreparedBindings> pixel;
 	};
 
+	struct SamplerCacheEntry {
+		const ShaderRecompiler::IR::CompiledShaderInfo* program = nullptr;
+		std::vector<ShaderRecompiler::IR::DescriptorValue> descriptors;
+		std::vector<vk::Sampler> samplers;
+	};
+
 	[[nodiscard]] TextureBinding ResolveTexture(const ShaderRecompiler::IR::ImageResource& resource,
 	                                            const ShaderRecompiler::IR::DescriptorValue& value);
 	void PrepareGraphicsBindings(std::span<PreparedBindings* const> stages,
@@ -211,6 +218,7 @@ private:
 	std::vector<vk::DescriptorImageInfo>  m_descriptor_images;
 	std::vector<vk::WriteDescriptorSet>   m_descriptor_writes;
 	std::vector<uint32_t>                 m_image_occurrences;
+	std::unordered_map<uint64_t, SamplerCacheEntry> m_sampler_cache;
 
 	friend class CommandProcessor;
 	friend struct RenderExecutorTestAccess;

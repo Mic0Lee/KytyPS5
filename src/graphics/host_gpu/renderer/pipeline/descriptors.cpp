@@ -36,6 +36,7 @@
 #include <limits>
 #include <span>
 #include <vector>
+#include <xxhash.h>
 
 #ifdef min
 #undef min
@@ -53,6 +54,8 @@ using BindingKind = ShaderRecompiler::IR::DescriptorBindingKind;
 std::atomic<uint64_t> g_prepare_bindings_count {0};
 std::atomic<uint64_t> g_rebind_buffers_count {0};
 std::atomic<uint64_t> g_descriptor_commit_count {0};
+std::atomic<uint64_t> g_sampler_cache_hits {0};
+std::atomic<uint64_t> g_sampler_cache_misses {0};
 
 } // namespace
 
@@ -754,9 +757,11 @@ PreparedBindings RenderExecutor::PrepareBindings(const ShaderStageRuntime& runti
 	const auto prepare_count = g_prepare_bindings_count.fetch_add(1, std::memory_order_relaxed) + 1;
 	if ((prepare_count & 255u) == 0) {
 		LOGF("Descriptor preparation: prepare=%" PRIu64 " rebind_buffers=%" PRIu64
-		     " commits=%" PRIu64 "\n",
+		     " commits=%" PRIu64 " sampler_hits=%" PRIu64 " sampler_misses=%" PRIu64 "\n",
 		     prepare_count, g_rebind_buffers_count.load(std::memory_order_relaxed),
-		     g_descriptor_commit_count.load(std::memory_order_relaxed));
+		     g_descriptor_commit_count.load(std::memory_order_relaxed),
+		     g_sampler_cache_hits.load(std::memory_order_relaxed),
+		     g_sampler_cache_misses.load(std::memory_order_relaxed));
 	}
 	const auto& program  = *runtime.program;
 	const auto& snapshot = runtime.resources;
@@ -768,9 +773,27 @@ PreparedBindings RenderExecutor::PrepareBindings(const ShaderStageRuntime& runti
 		BindImage(binding.image_id, binding.desc.type == TextureCache::BindingType::Storage);
 		prepared.images.push_back(std::move(binding));
 	}
-	prepared.samplers.reserve(program.info.samplers.size());
-	for (uint32_t i = 0; i < program.info.samplers.size(); i++) {
-		prepared.samplers.push_back(NativeSampler(m_context, program, i, snapshot.samplers[i]));
+	std::vector<ShaderRecompiler::IR::DescriptorValue> sampler_descriptors = snapshot.samplers;
+	uint64_t sampler_key = XXH64(&program, sizeof(program), 0);
+	for (const auto& descriptor: sampler_descriptors) {
+		sampler_key = XXH64(&descriptor, sizeof(descriptor), sampler_key);
+	}
+	if (const auto cached = m_sampler_cache.find(sampler_key);
+	    cached != m_sampler_cache.end() && cached->second.program == &program &&
+	    cached->second.descriptors == sampler_descriptors) {
+		prepared.samplers = cached->second.samplers;
+		g_sampler_cache_hits.fetch_add(1, std::memory_order_relaxed);
+	} else {
+		prepared.samplers.reserve(program.info.samplers.size());
+		for (uint32_t i = 0; i < program.info.samplers.size(); i++) {
+			prepared.samplers.push_back(NativeSampler(m_context, program, i, snapshot.samplers[i]));
+		}
+		if (m_sampler_cache.size() >= 1024) {
+			m_sampler_cache.erase(m_sampler_cache.begin());
+		}
+		m_sampler_cache.insert_or_assign(
+		    sampler_key, SamplerCacheEntry {&program, std::move(sampler_descriptors), prepared.samplers});
+		g_sampler_cache_misses.fetch_add(1, std::memory_order_relaxed);
 	}
 	prepared.shader_data.reserve(program.bindings.ShaderDataDwords());
 	for (const auto reg: program.bindings.user_data_registers) {
