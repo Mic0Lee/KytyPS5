@@ -16,6 +16,7 @@
 #include <span>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 namespace Libs::Graphics {
 
@@ -226,6 +227,8 @@ private:
 
 	void InitializeDriverCache();
 	void SaveUnlocked(bool destroy_cache);
+	[[nodiscard]] std::vector<uint8_t> CaptureCheckpointUnlocked();
+	void WriteCheckpoint(std::vector<uint8_t> payload);
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);
