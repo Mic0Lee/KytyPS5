@@ -4,6 +4,7 @@
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/renderContext.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -190,6 +191,7 @@ void CommandScheduler::Finish() {
 	m_master.Wait(CurrentTick() - 1);
 	BeginNext();
 	PopPendingOperations();
+	m_context.GetPipelineCache().CheckpointIfNeeded();
 }
 
 void CommandScheduler::Wait(uint64_t tick) {

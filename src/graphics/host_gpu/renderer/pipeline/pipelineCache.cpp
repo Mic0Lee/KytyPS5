@@ -516,6 +516,15 @@ void PipelineCache::SaveCheckpoint() {
 	SaveUnlocked(false);
 }
 
+void PipelineCache::CheckpointIfNeeded() {
+	const auto misses = m_graphics_pipeline_misses.load(std::memory_order_relaxed);
+	if (misses - m_last_checkpoint_miss_count < 128) {
+		return;
+	}
+	m_last_checkpoint_miss_count = misses;
+	SaveCheckpoint();
+}
+
 void PipelineCache::SaveUnlocked(bool destroy_cache) {
 	if (m_driver_cache == nullptr) {
 		return;
@@ -836,10 +845,6 @@ PipelineCache::Pipeline& PipelineCache::GetGraphicsPipeline(
 		LOGF("Graphics pipeline cache: hits=%" PRIu64 " misses=%" PRIu64
 		     " last_create_ms=%" PRId64 "\n",
 		     m_graphics_pipeline_hits.load(std::memory_order_relaxed), create_count, create_ms);
-	}
-	if (create_count - m_last_checkpoint_miss_count >= 128) {
-		m_last_checkpoint_miss_count = create_count;
-		SaveUnlocked(false);
 	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);

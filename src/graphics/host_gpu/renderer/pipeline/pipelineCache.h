@@ -111,6 +111,7 @@ public:
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
 	void SaveCheckpoint();
+	void CheckpointIfNeeded();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
