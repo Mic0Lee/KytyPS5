@@ -50,6 +50,10 @@ namespace {
 
 using BindingKind = ShaderRecompiler::IR::DescriptorBindingKind;
 
+std::atomic<uint64_t> g_prepare_bindings_count {0};
+std::atomic<uint64_t> g_rebind_buffers_count {0};
+std::atomic<uint64_t> g_descriptor_commit_count {0};
+
 } // namespace
 
 vk::DescriptorType NativeDescriptorType(BindingKind kind) {
@@ -747,6 +751,13 @@ void RenderExecutor::ResetBindings() {
 PreparedBindings RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(!runtime);
+	const auto prepare_count = g_prepare_bindings_count.fetch_add(1, std::memory_order_relaxed) + 1;
+	if ((prepare_count & 255u) == 0) {
+		LOGF("Descriptor preparation: prepare=%" PRIu64 " rebind_buffers=%" PRIu64
+		     " commits=%" PRIu64 "\n",
+		     prepare_count, g_rebind_buffers_count.load(std::memory_order_relaxed),
+		     g_descriptor_commit_count.load(std::memory_order_relaxed));
+	}
 	const auto& program  = *runtime.program;
 	const auto& snapshot = runtime.resources;
 	PreparedBindings prepared;
@@ -798,6 +809,7 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
+	g_rebind_buffers_count.fetch_add(1, std::memory_order_relaxed);
 	const auto& program   = *prepared.runtime->program;
 	const auto& snapshot  = prepared.runtime->resources;
 	const auto& layout    = program.bindings;
@@ -919,6 +931,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     const PipelineCache::Pipeline&     pipeline,
                                     std::span<PreparedBindings* const> prepared_bindings) {
 	KYTY_PROFILER_FUNCTION();
+	g_descriptor_commit_count.fetch_add(1, std::memory_order_relaxed);
 	auto   vk_buffer        = buffer.Handle();
 	size_t descriptor_count = 0;
 	size_t write_count      = 0;

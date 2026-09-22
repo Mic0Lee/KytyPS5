@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -302,6 +303,7 @@ struct PipelineCache::ProgramCache {
 				input_info.stage = {.program   = &permutation->program,
 				                    .resources = std::move(resources)};
 				permutation->program.bindings.AdvancePushData(push_data_cursor);
+				program_hits.fetch_add(1, std::memory_order_relaxed);
 				return permutation->handle;
 			}
 		}
@@ -344,7 +346,8 @@ struct PipelineCache::ProgramCache {
 		} else {
 			options.wave_size = input_info.wave_size;
 		}
-		auto translated = ShaderRecompiler::TranslateProgram(params.code, options);
+		const auto compile_start = std::chrono::steady_clock::now();
+		auto       translated    = ShaderRecompiler::TranslateProgram(params.code, options);
 		if (entry == programs.end()) {
 			auto resource_plan = ShaderRecompiler::IR::ExtractResourcePlan(translated.program);
 			EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(resource_plan, runtime, resources,
@@ -354,6 +357,15 @@ struct PipelineCache::ProgramCache {
 		entry->second.permutations.push_back(CompilePermutation(
 		    params, options, std::move(translated), std::move(specialization), push_data_cursor));
 		const auto& permutation = entry->second.permutations.back();
+		const auto compile_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		                            std::chrono::steady_clock::now() - compile_start)
+		                            .count();
+		const auto compile_count = compile_misses.fetch_add(1, std::memory_order_relaxed) + 1;
+		if ((compile_count & 31u) == 0) {
+			LOGF("Shader cache: hits=%" PRIu64 " compile_misses=%" PRIu64
+			     " last_compile_ms=%" PRId64 "\n",
+			     program_hits.load(std::memory_order_relaxed), compile_count, compile_ms);
+		}
 		input_info.stage = {.program = &permutation.program, .resources = std::move(resources)};
 		permutation.program.bindings.AdvancePushData(push_data_cursor);
 
@@ -389,6 +401,8 @@ struct PipelineCache::ProgramCache {
 	ProgramKey                                                  lookup_key;
 	vk::Device                                                  device;
 	uint64_t                                                    next_shader_id = 0;
+	std::atomic<uint64_t>                                       program_hits {0};
+	std::atomic<uint64_t>                                       compile_misses {0};
 };
 
 PipelineCache::PipelineCache(GraphicContext& graphics)
@@ -787,6 +801,7 @@ PipelineCache::Pipeline& PipelineCache::GetGraphicsPipeline(
 	}
 
 	if (auto iter = m_graphics_pipelines.find(key); iter != m_graphics_pipelines.end()) {
+		m_graphics_pipeline_hits.fetch_add(1, std::memory_order_relaxed);
 		return *iter->second;
 	}
 
@@ -801,10 +816,20 @@ PipelineCache::Pipeline& PipelineCache::GetGraphicsPipeline(
 	}
 
 	auto cached = std::make_unique<Pipeline>();
+	const auto create_start = std::chrono::steady_clock::now();
 	LogPipelineTrace("CreatePipelineInternal begin", vs_id, ps_id);
 	CreatePipelineInternal(m_graphics, *cached, rendering, key.vertex_input, vertex_info,
 	                       ps_input_info, programs, static_params, m_driver_cache);
 	LogPipelineTrace("CreatePipelineInternal done", vs_id, ps_id);
+	const auto create_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+	                          std::chrono::steady_clock::now() - create_start)
+	                          .count();
+	const auto create_count = m_graphics_pipeline_misses.fetch_add(1, std::memory_order_relaxed) + 1;
+	if ((create_count & 31u) == 0) {
+		LOGF("Graphics pipeline cache: hits=%" PRIu64 " misses=%" PRIu64
+		     " last_create_ms=%" PRId64 "\n",
+		     m_graphics_pipeline_hits.load(std::memory_order_relaxed), create_count, create_ms);
+	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);
@@ -826,6 +851,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 
 	if (auto iter = m_compute_pipelines.find(compute_program.id);
 	    iter != m_compute_pipelines.end()) {
+		m_compute_pipeline_hits.fetch_add(1, std::memory_order_relaxed);
 		return *iter->second;
 	}
 
@@ -834,7 +860,17 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	}
 
 	auto cached = std::make_unique<Pipeline>();
+	const auto create_start = std::chrono::steady_clock::now();
 	CreatePipelineInternal(m_graphics, *cached, input_info, compute_program.module, m_driver_cache);
+	const auto create_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+	                          std::chrono::steady_clock::now() - create_start)
+	                          .count();
+	const auto create_count = m_compute_pipeline_misses.fetch_add(1, std::memory_order_relaxed) + 1;
+	if ((create_count & 31u) == 0) {
+		LOGF("Compute pipeline cache: hits=%" PRIu64 " misses=%" PRIu64
+		     " last_create_ms=%" PRId64 "\n",
+		     m_compute_pipeline_hits.load(std::memory_order_relaxed), create_count, create_ms);
+	}
 
 	EXIT_NOT_IMPLEMENTED(cached->pipeline == nullptr);
 	EXIT_NOT_IMPLEMENTED(cached->pipeline_layout == nullptr);

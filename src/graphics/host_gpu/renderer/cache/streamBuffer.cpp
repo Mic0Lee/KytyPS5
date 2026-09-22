@@ -2,11 +2,14 @@
 
 #include "common/alignment.h"
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 
 #include <cstring>
+#include <atomic>
+#include <chrono>
 #include <numeric>
 #include <vk_mem_alloc.h>
 
@@ -16,6 +19,9 @@ namespace {
 
 constexpr size_t WATCHES_INITIAL_RESERVE = 0x4000;
 constexpr size_t WATCHES_RESERVE_CHUNK   = 0x1000;
+
+std::atomic<uint64_t> g_wait_count {0};
+std::atomic<uint64_t> g_wait_time_us {0};
 
 [[nodiscard]] VmaAllocationCreateFlags AllocationFlags(MemoryUsage usage) {
 	switch (usage) {
@@ -322,9 +328,20 @@ bool StreamBuffer::WaitPendingOperations(const std::vector<Watch>& watches,
 		if (!Scheduler().IsFree(watch.tick) && !allow_wait) {
 			return false;
 		}
+		const auto wait_start = std::chrono::steady_clock::now();
 		Scheduler().Wait(watch.tick);
 		if (Usage() == MemoryUsage::Download) {
 			Scheduler().WaitPriorityOperations(watch.tick);
+		}
+		const auto wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
+		                         std::chrono::steady_clock::now() - wait_start)
+		                         .count();
+		const auto wait_count = g_wait_count.fetch_add(1, std::memory_order_relaxed) + 1;
+		g_wait_time_us.fetch_add(static_cast<uint64_t>(wait_us), std::memory_order_relaxed);
+		if ((wait_count & 63u) == 0) {
+			LOGF("Stream buffer waits: count=%" PRIu64 " total_us=%" PRIu64
+			     " last_us=%" PRId64 "\n",
+			     wait_count, g_wait_time_us.load(std::memory_order_relaxed), wait_us);
 		}
 		wait_bound = watch.upper_bound;
 		++wait_cursor;

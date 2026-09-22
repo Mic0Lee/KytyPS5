@@ -9,6 +9,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/shader.h"
 
+#include <atomic>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -215,6 +216,10 @@ private:
 	                                                        m_graphics_pipelines;
 	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_pipelines;
 	Common::Mutex m_mutex;
+	std::atomic<uint64_t> m_graphics_pipeline_hits {0};
+	std::atomic<uint64_t> m_graphics_pipeline_misses {0};
+	std::atomic<uint64_t> m_compute_pipeline_hits {0};
+	std::atomic<uint64_t> m_compute_pipeline_misses {0};
 
 	void InitializeDriverCache();
 };
