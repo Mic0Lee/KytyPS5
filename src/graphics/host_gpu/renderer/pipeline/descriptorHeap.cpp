@@ -47,9 +47,11 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout layout) {
 	}
 
 	m_pending_pools.emplace_back(m_current_pool, m_master_semaphore.CurrentTick());
-	if (const auto& [pool, tick] = m_pending_pools.front(); m_master_semaphore.IsFree(tick)) {
-		m_current_pool = pool;
-		m_pending_pools.pop_front();
+	const auto reusable = std::ranges::find_if(
+	    m_pending_pools, [this](const auto& pending) { return m_master_semaphore.IsFree(pending.second); });
+	if (reusable != m_pending_pools.end()) {
+		m_current_pool = reusable->first;
+		m_pending_pools.erase(reusable);
 		m_pool_reuses.fetch_add(1, std::memory_order_relaxed);
 		EXIT_IF(m_graphics.device.resetDescriptorPool(m_current_pool, {}) != vk::Result::eSuccess);
 	} else {
